@@ -84,35 +84,104 @@ function Timeline({ job, showAxis = true }) {
   );
 }
 
-// ---------------------- proof-time distribution histogram ----------------------
-function Histogram({ dist, height = 150 }) {
+// ---------------------- proof-time distribution (density curve) ----------------------
+// Catmull-Rom → sampled polyline, clamped to baseline so the area never dips < 0.
+function smoothPoints(pts, baseY, perSeg = 18) {
+  if (pts.length < 2) return pts.slice();
+  const out = [];
+  for (let i = 0; i < pts.length - 1; i++) {
+    const p0 = pts[i - 1] || pts[i], p1 = pts[i], p2 = pts[i + 1], p3 = pts[i + 2] || pts[i + 1];
+    for (let s = 0; s < perSeg; s++) {
+      const t = s / perSeg, t2 = t * t, t3 = t2 * t;
+      const x = 0.5 * ((2 * p1.x) + (-p0.x + p2.x) * t + (2 * p0.x - 5 * p1.x + 4 * p2.x - p3.x) * t2 + (-p0.x + 3 * p1.x - 3 * p2.x + p3.x) * t3);
+      let y = 0.5 * ((2 * p1.y) + (-p0.y + p2.y) * t + (2 * p0.y - 5 * p1.y + 4 * p2.y - p3.y) * t2 + (-p0.y + 3 * p1.y - 3 * p2.y + p3.y) * t3);
+      out.push({ x, y: Math.min(baseY, y) }); // clamp overshoot below baseline
+    }
+  }
+  out.push(pts[pts.length - 1]);
+  return out;
+}
+
+function Histogram({ dist, height = 168 }) {
   if (!dist || !dist.hist.length) return <div className="empty">No data</div>;
+
+  const W = 640, H = 200;
+  const padL = 30, padR = 16, padT = 16, padB = 30;
+  const plotW = W - padL - padR, plotH = H - padT - padB;
+  const baseY = padT + plotH;
+
+  const LO = dist.hist[0].lo, HI = dist.hist[dist.hist.length - 1].hi; // 180 .. 540 s
   const max = Math.max(1, ...dist.hist.map((b) => b.count));
-  const targetIdx = dist.hist.findIndex((b) => b.lo + 15 > dist.target);
-  const targetPct = ((targetIdx >= 0 ? targetIdx : dist.hist.length) / dist.hist.length) * 100;
+  const xFor = (sec) => padL + ((sec - LO) / (HI - LO)) * plotW;
+  const yFor = (count) => padT + plotH - (count / max) * plotH;
+  const targetX = xFor(dist.target);
+
+  // anchor curve to baseline at both domain edges, peak at each bin centre
+  const pts = [{ x: xFor(LO), y: baseY }, ...dist.hist.map((b) => ({ x: xFor(b.lo + 15), y: yFor(b.count) })), { x: xFor(HI), y: baseY }];
+  const curve = smoothPoints(pts, baseY);
+  const linePath = curve.map((p, i) => `${i ? "L" : "M"}${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(" ");
+  const areaPath = `M${curve[0].x.toFixed(1)} ${baseY} ` + curve.map((p) => `L${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(" ") + ` L${curve[curve.length - 1].x.toFixed(1)} ${baseY} Z`;
+
+  // y gridlines at 0, mid, max
+  const yTicks = [0, Math.ceil(max / 2), max].filter((v, i, a) => a.indexOf(v) === i);
+
   return (
     <div className="hist">
-      <div className="hist-plot" style={{ height: height + "px" }}>
-        <div className="hist-thresh" style={{ left: targetPct + "%" }}>
-          <span className="ht-label">target {_fmtClock(dist.target * 1000)}</span>
-        </div>
-        <div className="hist-bars">
-          {dist.hist.map((b, i) => (
-            <div key={i} className="hbar-col">
-              <div className="hbar-track">
-                <div className={"hbar " + b.band} style={{ height: (b.count / max) * 100 + "%" }}>
-                  {b.count > 0 && <span className="hbar-n">{b.count}</span>}
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-      <div className="hist-axis">
-        {dist.hist.map((b, i) => (
-          <span key={i} className="hx">{i % 2 === 0 ? `${Math.floor(b.lo / 60)}:${_pad(b.lo % 60)}` : ""}</span>
+      <svg className="hist-svg" viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: "auto", display: "block" }}>
+        <defs>
+          <linearGradient id="distGreen" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="var(--good)" stopOpacity="0.34" />
+            <stop offset="100%" stopColor="var(--good)" stopOpacity="0.02" />
+          </linearGradient>
+          <linearGradient id="distRed" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="var(--coral)" stopOpacity="0.30" />
+            <stop offset="100%" stopColor="var(--coral)" stopOpacity="0.02" />
+          </linearGradient>
+          <clipPath id="clipGreen"><rect x="0" y="0" width={targetX} height={H} /></clipPath>
+          <clipPath id="clipRed"><rect x={targetX} y="0" width={W - targetX} height={H} /></clipPath>
+        </defs>
+
+        {/* gridlines + y labels */}
+        {yTicks.map((v, i) => {
+          const y = yFor(v);
+          return (
+            <g key={i}>
+              <line x1={padL} y1={y} x2={W - padR} y2={y} stroke="var(--line)" strokeWidth="1" strokeDasharray={v === 0 ? "0" : "3 4"} />
+              <text x={padL - 6} y={y + 3.5} textAnchor="end" fill="var(--t3)" style={{ font: "500 10px var(--mono)" }}>{v}</text>
+            </g>
+          );
+        })}
+
+        {/* split density fill */}
+        <path d={areaPath} fill="url(#distGreen)" clipPath="url(#clipGreen)" />
+        <path d={areaPath} fill="url(#distRed)" clipPath="url(#clipRed)" />
+        <path d={linePath} fill="none" stroke="var(--good)" strokeWidth="2" strokeLinejoin="round" clipPath="url(#clipGreen)" />
+        <path d={linePath} fill="none" stroke="var(--coral)" strokeWidth="2" strokeLinejoin="round" clipPath="url(#clipRed)" />
+
+        {/* bin markers + counts */}
+        {dist.hist.map((b, i) => b.count > 0 && (
+          <g key={i}>
+            <circle cx={xFor(b.lo + 15)} cy={yFor(b.count)} r="2.6" fill={(b.lo + 15) <= dist.target ? "var(--good)" : "var(--coral)"} />
+            <text x={xFor(b.lo + 15)} y={yFor(b.count) - 7} textAnchor="middle" fill="var(--t2)" style={{ font: "600 10px var(--mono)" }}>{b.count}</text>
+          </g>
         ))}
-      </div>
+
+        {/* target threshold */}
+        <line x1={targetX} y1={padT - 4} x2={targetX} y2={baseY} stroke="var(--accent)" strokeWidth="1.4" strokeDasharray="4 3" />
+        <g transform={`translate(${Math.min(targetX, W - padR - 96)}, ${padT - 4})`}>
+          <rect x="4" y="-2" width="92" height="15" rx="3.5" fill="var(--accent-soft)" />
+          <text x="9" y="9" fill="var(--accent-ink)" style={{ font: "600 9.5px var(--mono)" }}>target {_fmtClock(dist.target * 1000)}</text>
+        </g>
+
+        {/* x axis labels (every other bin) */}
+        {dist.hist.map((b, i) => i % 2 === 0 && (
+          <text key={i} x={xFor(b.lo)} y={H - 9} textAnchor="middle" fill="var(--t3)" style={{ font: "500 10px var(--mono)" }}>
+            {`${Math.floor(b.lo / 60)}:${_pad(b.lo % 60)}`}
+          </text>
+        ))}
+        <text x={W - padR} y={H - 9} textAnchor="end" fill="var(--t3)" style={{ font: "500 10px var(--mono)" }}>{`${Math.floor(HI / 60)}:${_pad(HI % 60)}`}</text>
+      </svg>
+
       <div className="hist-legend">
         <span className="hl"><i className="sw green"></i><b>{dist.green}</b><span className="hl-t">on target</span></span>
         <span className="hl"><i className="sw red"></i><b>{dist.yellow}</b><span className="hl-t">over target</span></span>
