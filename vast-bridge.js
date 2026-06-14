@@ -158,12 +158,14 @@ function aggRecords() {
   let fl = []; try { fl = fs.readdirSync(LOGS); } catch {}
   const out = [];
   for (const f of fl) {
-    const m = f.match(/^agg-(\d+)-to-(\d+)\.log$/); if (!m) continue;
+    // real name: agg-<firstStart>-<firstEnd>-to-<lastStart>-<lastEnd>.log
+    const m = f.match(/^agg-(\d+)-\d+-to-\d+-(\d+)\.log$/); if (!m) continue;
     let txt = ""; try { txt = fs.readFileSync(path.join(LOGS, f), "utf8").replace(/\x1b\[[0-9;]*m/g, ""); } catch { continue; }
     let totalMs = 0; for (const mm of txt.matchAll(/<<< [A-Z_]+ \((\d+)ms\)/g)) totalMs += +mm[1];
-    const done = /proof saved|Aggregated proof|Final proof|PLONK proof|Saved (agg|final)/i.test(txt);
+    const snarkM = txt.match(/<<< GENERATING_WRAPPER_SNARK_PROOF \((\d+)ms\)/);
+    const done = /Aggregation proof generated|Proof artifacts saved/i.test(txt);
     const st = fs.statSync(path.join(LOGS, f));
-    out.push({ first: +m[1], last: +m[2], totalMs, done, finishedAt: st.mtimeMs });
+    out.push({ first: +m[1], last: +m[2], blocks: (+m[2]) - (+m[1]), totalMs, snarkMs: snarkM ? +snarkM[1] : 0, done, finishedAt: st.mtimeMs });
   }
   return out.sort((a, b) => b.finishedAt - a.finishedAt);
 }
