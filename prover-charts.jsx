@@ -141,8 +141,8 @@ function Histogram({ dist }) {
 
   const yTicks = [0, Math.ceil(max / 2), max].filter((v, i, a) => a.indexOf(v) === i);
   const marks = [
-    { x: dist.p50, label: "median", color: "var(--accent)" },
-    { x: dist.p95, label: "p95", color: "var(--coral)" },
+    { x: dist.p50, color: "var(--accent)" },   // median — red dashed
+    { x: dist.p95, color: "var(--t3)" },        // p95 — gray dashed
   ];
 
   return (
@@ -159,29 +159,21 @@ function Histogram({ dist }) {
           );
         })}
 
-        {/* single-tone bars + counts */}
+        {/* calm charcoal bars + counts */}
         {dist.hist.map((b, i) => {
           const cx = xFor(b.lo + (b.hi - b.lo) / 2);
           return (
             <g key={i}>
-              <rect x={cx - bw / 2} y={yFor(b.count)} width={bw} height={baseY - yFor(b.count)} rx="3" fill="var(--accent)" opacity={b.count ? 0.82 : 0} />
+              <rect x={cx - bw / 2} y={yFor(b.count)} width={bw} height={baseY - yFor(b.count)} rx="3.5" fill="var(--dark)" opacity={b.count ? 0.86 : 0} />
               {b.count > 0 && <text x={cx} y={yFor(b.count) - 6} textAnchor="middle" fill="var(--t2)" style={{ font: "600 10px var(--mono)" }}>{b.count}</text>}
             </g>
           );
         })}
 
-        {/* median + p95 markers */}
+        {/* median + p95 lines (no labels — legend maps them by colour) */}
         {marks.map((mk, i) => {
           const x = Math.max(padL, Math.min(W - padR, xFor(mk.x)));
-          return (
-            <g key={i}>
-              <line x1={x} y1={padT - 2} x2={x} y2={baseY} stroke={mk.color} strokeWidth="1.4" strokeDasharray="4 3" />
-              <g transform={`translate(${Math.min(x + 4, W - padR - 70)}, ${padT - 2})`}>
-                <rect x="0" y="-2" width="68" height="15" rx="3.5" fill={mk.color} opacity="0.14" />
-                <text x="5" y="9" fill={mk.color} style={{ font: "600 9.5px var(--mono)" }}>{mk.label} {fmtT(mk.x)}</text>
-              </g>
-            </g>
-          );
+          return <line key={i} x1={x} y1={padT} x2={x} y2={baseY} stroke={mk.color} strokeWidth="1.6" strokeDasharray="4 4" />;
         })}
 
         {/* x axis labels */}
@@ -193,8 +185,8 @@ function Histogram({ dist }) {
 
       <div className="hist-legend">
         <span className="hl"><span className="hl-t">fastest</span><b>{fmtT(dist.fastest)}</b></span>
-        <span className="hl"><span className="hl-t">median</span><b>{fmtT(dist.p50)}</b></span>
-        <span className="hl"><span className="hl-t">p95</span><b>{fmtT(dist.p95)}</b></span>
+        <span className="hl"><i className="sw" style={{ background: "var(--accent)" }}></i><span className="hl-t">median</span><b>{fmtT(dist.p50)}</b></span>
+        <span className="hl"><i className="sw" style={{ background: "var(--t3)" }}></i><span className="hl-t">p95</span><b>{fmtT(dist.p95)}</b></span>
         <span className="hl grow"><span className="hl-t">slowest</span><b>{fmtT(dist.slowest)}</b></span>
       </div>
     </div>
