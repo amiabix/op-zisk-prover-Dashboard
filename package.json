@@ -1,0 +1,9 @@
+{
+  "name": "opzisk-dashboard",
+  "private": true,
+  "scripts": { "build": "node build.mjs" },
+  "devDependencies": {
+    "@babel/core": "^7",
+    "@babel/preset-react": "^7"
+  }
+}

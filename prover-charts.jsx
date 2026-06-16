@@ -118,8 +118,9 @@ function ProofTrend({ jobs, stats }) {
     .map((j) => ({ ms: j.elapsedMs, id: j.id, s: j.rangeStart, e: j.rangeEnd, blk: j.blocks }));
   if (pts.length < 2 || !stats) return <div className="empty">Not enough data yet</div>;
 
-  const W = 640, H = 200;
-  const padL = 36, padR = 16, padT = 16, padB = 26;
+  // wide viewBox ≈ panel aspect so the chart renders near 1:1 (crisp, not 2x-upscaled)
+  const W = 1200, H = 210;
+  const padL = 46, padR = 22, padT = 18, padB = 30;
   const plotW = W - padL - padR, plotH = H - padT - padB, baseY = padT + plotH;
 
   const secs = pts.map((p) => p.ms / 1000);
