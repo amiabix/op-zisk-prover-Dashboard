@@ -127,6 +127,7 @@
       // first real snapshot arrives — a failed fetch must never surface fabricated jobs.
       const live = typeof window !== "undefined" && window.OPZISK_FEED_URL;
       if (!live) this._seed();
+      this._recomputeStats(); // ensure stats always has a complete shape (incl. dist) from frame 1
     }
 
     // ---- pub/sub ----
