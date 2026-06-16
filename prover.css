@@ -141,6 +141,9 @@ body {
 .ah-tab:hover { color: var(--ink); background: var(--card-soft); }
 .ah-tab.on { color: #fff; background: var(--dark); box-shadow: 0 4px 12px rgba(43,51,38,0.22); }
 .view { max-width: 1560px; }
+/* uniform vertical rhythm between top-level blocks — structured, not a pile of cards */
+.view > * + * { margin-top: 28px; }
+.view > .apphead { margin-top: 0; }
 
 /* ===================== HEADER (greeting + search) ===================== */
 .apphead { display: flex; align-items: center; justify-content: space-between; gap: 26px; padding: 20px 0 18px; margin-bottom: 10px; border-bottom: 1px solid var(--line); }

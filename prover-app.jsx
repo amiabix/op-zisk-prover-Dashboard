@@ -357,24 +357,34 @@ function NetMetrics({ m }) {
 }
 
 function Dashboard({ snap, now }) {
-  const live = !!snap.cluster;
+  const m = snap.metrics;
   return (
     <div className="view">
       <MainBar title="Live" sub={snap.source || "real-time OP range proving"} snap={snap} now={now} />
-      <Rail snap={snap} />
+
+      {/* 1 — live job (top priority) */}
       <CurrentJob job={snap.active} />
-      <NetMetrics m={snap.metrics} />
+
+      {/* 2 — headline KPIs */}
+      <Rail snap={snap} />
+
+      {/* 3 — detailed network metrics */}
+      <NetMetrics m={m} />
+
+      {/* 4 — proof-time distribution + backlog */}
       <div className="dash-grid">
         <div className="panel-b">
-          <div className="sec"><span className="sec-t">Proof-time distribution</span><span className="rule"></span><span className="sec-c">{snap.stats.dist ? snap.stats.dist.total : 0} proven</span></div>
+          <div className="sec"><span className="sec-t">Proof-time distribution</span><span className="rule"></span><span className="sec-c">{snap.stats.dist ? snap.stats.dist.total : 0} ranges</span></div>
           <Histogram dist={snap.stats.dist} />
         </div>
-        {live ? <Cluster cluster={snap.cluster} /> : <Queue queue={snap.queue} perAgg={snap.metrics && snap.metrics.rangesPerAgg} />}
+        <Queue queue={snap.queue} perAgg={m && m.rangesPerAgg} />
       </div>
+
+      {/* 5 — aggregations */}
       <AggList aggs={snap.aggregations} />
-      {live && snap.history.length === 0
-        ? <div className="panel-b"><div className="sec"><span className="sec-t">Proving stream</span><span className="rule"></span></div><div className="empty">Coordinator 1.0.0-beta exposes aggregate metrics only — no per-range rows. Per-job stream needs the /api/v1 build or Postgres history.</div></div>
-        : <StreamTable history={snap.history} />}
+
+      {/* 6 — recent ranges */}
+      <StreamTable history={snap.history} />
     </div>
   );
 }
@@ -386,7 +396,7 @@ function AggList({ aggs }) {
   const visible = aggs.slice(0, shown);
   const more = aggs.length - visible.length;
   return (
-    <div className="panel-b" style={{ marginTop: 24 }}>
+    <div className="panel-b">
       <div className="sec"><span className="sec-t">Aggregations</span><span className="sec-c">{aggs.length}</span><span className="rule"></span><span className="sec-c">PLONK · batches of range proofs</span></div>
       {visible.map((a) => (
         <div key={a.id} className="qrow" onClick={() => nav(`#/block/${a.id}`)}>
