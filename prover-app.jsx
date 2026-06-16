@@ -40,30 +40,6 @@ function ThemeToggle() {
   );
 }
 
-// ======================= SIDEBAR =======================
-function Sidebar({ route, snap, onNav }) {
-  const items = [
-    { key: "dashboard", label: "Live", hash: "#/", icon: <path d="M2 9h3l2-5 3 11 2-6h4" /> },
-    { key: "blocks", label: "Blocks", hash: "#/blocks", icon: <g><rect x="2.5" y="2.5" width="13" height="4" rx="1.4" /><rect x="2.5" y="7.5" width="13" height="4" rx="1.4" /><rect x="2.5" y="12.5" width="13" height="2.8" rx="1.4" /></g> },
-  ];
-  return (
-    <aside className="sidebar">
-      <div className="sb-rail">
-        {items.map((it) => (
-          <a key={it.key} className={"sb-item" + (route.name === it.key ? " on" : "")} title={it.label} href={it.hash} onClick={(e) => { e.preventDefault(); onNav(it.hash); }}>
-            <svg width="19" height="19" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">{it.icon}</svg>
-          </a>
-        ))}
-        <div className="sb-spacer"></div>
-        <ThemeToggle />
-        <button className="sb-item" type="button" title="Sign out" onClick={() => { if (window.confirm("Reset the dashboard view?")) window.location.reload(); }}>
-          <svg width="19" height="19" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M7 15.5H3.5a1 1 0 0 1-1-1v-11a1 1 0 0 1 1-1H7M11.5 12l3-3-3-3M14.5 9H7" /></svg>
-        </button>
-      </div>
-    </aside>
-  );
-}
-
 // ======================= SEARCH (job id · block · host) =======================
 function Search({ snap }) {
   const [q, setQ] = useState("");
