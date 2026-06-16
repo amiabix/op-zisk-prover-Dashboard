@@ -1,6 +1,6 @@
 // ==============================================================
 // OP-ZiSK Prover — chart components → window.
-// Sparkline, Timeline (stage gantt + playhead + axis), Histogram.
+// Sparkline, Timeline (stage gantt), ProofTrend (proof-time series).
 // ==============================================================
 const { pad: _pad, fmtSecs: _fmtSecs, fmtClock: _fmtClock, SHORT: _SHORT } = window.PU;
 
@@ -106,101 +106,68 @@ function Timeline({ job, showAxis = true }) {
   );
 }
 
-// ---------------------- proof-time distribution (density curve) ----------------------
-// Catmull-Rom → sampled polyline, clamped to baseline so the area never dips < 0.
-function smoothPoints(pts, baseY, perSeg = 18) {
-  if (pts.length < 2) return pts.slice();
-  const out = [];
-  for (let i = 0; i < pts.length - 1; i++) {
-    const p0 = pts[i - 1] || pts[i], p1 = pts[i], p2 = pts[i + 1], p3 = pts[i + 2] || pts[i + 1];
-    for (let s = 0; s < perSeg; s++) {
-      const t = s / perSeg, t2 = t * t, t3 = t2 * t;
-      const x = 0.5 * ((2 * p1.x) + (-p0.x + p2.x) * t + (2 * p0.x - 5 * p1.x + 4 * p2.x - p3.x) * t2 + (-p0.x + 3 * p1.x - 3 * p2.x + p3.x) * t3);
-      let y = 0.5 * ((2 * p1.y) + (-p0.y + p2.y) * t + (2 * p0.y - 5 * p1.y + 4 * p2.y - p3.y) * t2 + (-p0.y + 3 * p1.y - 3 * p2.y + p3.y) * t3);
-      out.push({ x, y: Math.min(baseY, y) }); // clamp overshoot below baseline
-    }
-  }
-  out.push(pts[pts.length - 1]);
-  return out;
-}
-
-function Histogram({ dist }) {
-  if (!dist || !dist.hist.length) return <div className="empty">No data yet</div>;
+// ---------------------- proof-time trend (time series of recent ranges) ----------------------
+// Each point = one recent range's total proof time, oldest → newest left to right.
+// Far easier to read than a distribution: you see whether proving is steady or drifting.
+function ProofTrend({ durations, stats }) {
+  const secs = (durations || []).slice().reverse().map((ms) => ms / 1000); // chronological
+  if (secs.length < 2 || !stats) return <div className="empty">Not enough data yet</div>;
 
   const W = 640, H = 200;
-  const padL = 26, padR = 16, padT = 18, padB = 28;
-  const plotW = W - padL - padR, plotH = H - padT - padB;
-  const baseY = padT + plotH;
+  const padL = 34, padR = 14, padT = 16, padB = 24;
+  const plotW = W - padL - padR, plotH = H - padT - padB, baseY = padT + plotH;
 
-  const LO = dist.hist[0].lo, HI = dist.hist[dist.hist.length - 1].hi;
-  const max = Math.max(1, ...dist.hist.map((b) => b.count));
-  const xFor = (sec) => padL + ((sec - LO) / (HI - LO)) * plotW;
-  const yFor = (count) => baseY - (count / max) * plotH;
-  const fmtT = (sec) => `${Math.floor(sec / 60)}:${_pad(Math.round(sec) % 60)}`;
-  const bw = (plotW / dist.hist.length) * 0.7;
+  const hi = Math.max(...secs, stats.p95 || 0) * 1.08;
+  const xFor = (i) => padL + (i / (secs.length - 1)) * plotW;
+  const yFor = (s) => baseY - (s / (hi || 1)) * plotH;
+  const fmtT = (s) => `${Math.floor(s / 60)}:${_pad(Math.round(s) % 60)}`;
 
-  const yTicks = [0, Math.ceil(max / 2), max].filter((v, i, a) => a.indexOf(v) === i);
-  const marks = [
-    { x: dist.p50, color: "var(--accent)" },   // median — red dashed
-    { x: dist.p95, color: "var(--t3)" },        // p95 — gray dashed
+  const pts = secs.map((s, i) => ({ x: xFor(i), y: yFor(s) }));
+  const line = pts.map((p, i) => `${i ? "L" : "M"}${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(" ");
+  const area = `M${pts[0].x.toFixed(1)} ${baseY} ` + pts.map((p) => `L${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(" ") + ` L${pts[pts.length - 1].x.toFixed(1)} ${baseY} Z`;
+  const last = pts[pts.length - 1];
+
+  // y reference lines: median (accent) + p95 (gray)
+  const refs = [
+    { s: stats.p50, color: "var(--accent)" },
+    { s: stats.p95, color: "var(--t3)" },
   ];
+  const yTicks = [0, stats.p50, hi].filter((v, i, a) => v != null && a.indexOf(v) === i);
 
   return (
     <div className="hist">
       <svg className="hist-svg" viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: "auto", display: "block" }}>
-        {/* y gridlines */}
-        {yTicks.map((v, i) => {
-          const y = yFor(v);
-          return (
-            <g key={i}>
-              <line x1={padL} y1={y} x2={W - padR} y2={y} stroke="var(--line)" strokeWidth="1" strokeDasharray={v === 0 ? "0" : "3 4"} />
-              <text x={padL - 6} y={y + 3.5} textAnchor="end" fill="var(--t3)" style={{ font: "500 10px var(--mono)" }}>{v}</text>
-            </g>
-          );
-        })}
-
-        {/* smooth density curve: the general shape of proof times */}
-        {(() => {
-          const cen = dist.hist.map((b) => ({ x: xFor(b.lo + (b.hi - b.lo) / 2), y: yFor(b.count), c: b.count }));
-          const anchored = [{ x: cen[0].x, y: baseY }, ...cen.map((p) => ({ x: p.x, y: p.y })), { x: cen[cen.length - 1].x, y: baseY }];
-          const curve = smoothPoints(anchored, baseY);
-          const line = curve.map((p, i) => `${i ? "L" : "M"}${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(" ");
-          const area = `M${curve[0].x.toFixed(1)} ${baseY} ` + curve.map((p) => `L${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(" ") + ` L${curve[curve.length - 1].x.toFixed(1)} ${baseY} Z`;
-          return (
-            <g>
-              <path d={area} fill="var(--dark)" opacity="0.06" />
-              <path d={line} fill="none" stroke="var(--dark)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" strokeDasharray="2 5" opacity="0.85" />
-              {cen.map((p, i) => p.c > 0 && (
-                <g key={i}>
-                  <circle cx={p.x} cy={p.y} r="3.2" fill="var(--dark)" />
-                  <text x={p.x} y={p.y - 9} textAnchor="middle" fill="var(--t2)" style={{ font: "600 10px var(--mono)" }}>{p.c}</text>
-                </g>
-              ))}
-            </g>
-          );
-        })()}
-
-        {/* median + p95 lines (no labels — legend maps them by colour) */}
-        {marks.map((mk, i) => {
-          const x = Math.max(padL, Math.min(W - padR, xFor(mk.x)));
-          return <line key={i} x1={x} y1={padT} x2={x} y2={baseY} stroke={mk.color} strokeWidth="1.6" strokeDasharray="4 4" />;
-        })}
-
-        {/* x axis labels */}
-        {dist.hist.map((b, i) => i % 2 === 0 && (
-          <text key={i} x={xFor(b.lo)} y={H - 8} textAnchor="middle" fill="var(--t3)" style={{ font: "500 10px var(--mono)" }}>{fmtT(b.lo)}</text>
+        {/* y axis ticks (minutes) */}
+        {yTicks.map((v, i) => (
+          <text key={i} x={padL - 8} y={yFor(v) + 3.5} textAnchor="end" fill="var(--t3)" style={{ font: "500 10px var(--mono)" }}>{fmtT(v)}</text>
         ))}
-        <text x={W - padR} y={H - 8} textAnchor="end" fill="var(--t3)" style={{ font: "500 10px var(--mono)" }}>{fmtT(HI)}</text>
+
+        {/* horizontal median + p95 reference lines */}
+        {refs.map((r, i) => (
+          <line key={i} x1={padL} y1={yFor(r.s)} x2={W - padR} y2={yFor(r.s)} stroke={r.color} strokeWidth="1.4" strokeDasharray="4 4" opacity="0.7" />
+        ))}
+
+        {/* trend area + line */}
+        <path d={area} fill="var(--dark)" opacity="0.05" />
+        <path d={line} fill="none" stroke="var(--dark)" strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" opacity="0.9" />
+
+        {/* latest point */}
+        <circle cx={last.x} cy={last.y} r="3.6" fill="var(--dark)" />
+        <circle cx={last.x} cy={last.y} r="6.5" fill="none" stroke="var(--dark)" strokeWidth="1.2" opacity="0.3" />
+
+        {/* x direction hint */}
+        <text x={padL} y={H - 7} textAnchor="start" fill="var(--t4)" style={{ font: "500 10px var(--mono)" }}>older</text>
+        <text x={W - padR} y={H - 7} textAnchor="end" fill="var(--t4)" style={{ font: "500 10px var(--mono)" }}>latest</text>
       </svg>
 
       <div className="hist-legend">
-        <span className="hl"><span className="hl-t">fastest</span><b>{fmtT(dist.fastest)}</b></span>
-        <span className="hl"><i className="sw" style={{ background: "var(--accent)" }}></i><span className="hl-t">median</span><b>{fmtT(dist.p50)}</b></span>
-        <span className="hl"><i className="sw" style={{ background: "var(--t3)" }}></i><span className="hl-t">p95</span><b>{fmtT(dist.p95)}</b></span>
-        <span className="hl grow"><span className="hl-t">slowest</span><b>{fmtT(dist.slowest)}</b></span>
+        <span className="hl"><span className="hl-t">fastest</span><b>{fmtT(stats.fastest)}</b></span>
+        <span className="hl"><i className="sw" style={{ background: "var(--accent)" }}></i><span className="hl-t">median</span><b>{fmtT(stats.p50)}</b></span>
+        <span className="hl"><i className="sw" style={{ background: "var(--t3)" }}></i><span className="hl-t">p95</span><b>{fmtT(stats.p95)}</b></span>
+        <span className="hl grow"><span className="hl-t">slowest</span><b>{fmtT(stats.slowest)}</b></span>
       </div>
     </div>
   );
 }
 
-Object.assign(window, { Sparkline, Timeline, Histogram });
+Object.assign(window, { Sparkline, Timeline, ProofTrend });

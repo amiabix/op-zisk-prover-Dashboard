@@ -1,12 +1,12 @@
 // ==============================================================
 // OP-ZiSK Prover — app shell + hash router + views.
 // Views: dashboard (live) · blocks (list) · block (detail).
-// Depends on window.PU (util), window.{Sparkline,Timeline,Histogram},
+// Depends on window.PU (util), window.{Sparkline,Timeline,ProofTrend},
 // and window.proverFeed (data).
 // ==============================================================
 const { useState, useEffect } = React;
 const { pad, fmtClock, fmtSecs, fmtDur, fmtNum, fmtCompact, fmtBlock, fmtBytes, fmtUSD, shortHash, timeAgo, jobCost, jobTotalMs, FULL, stageStatus } = window.PU;
-const { Sparkline, Timeline, Histogram } = window;
+const { Sparkline, Timeline, ProofTrend } = window;
 
 const nav = (hash) => { window.location.hash = hash; };
 function parseHash() {
@@ -371,10 +371,10 @@ function Dashboard({ snap, now }) {
       {/* 3 — detailed network metrics */}
       <NetMetrics m={m} />
 
-      {/* 4 — proof-time distribution (full width — wide chart) */}
+      {/* 4 — proof-time trend (full width — wide chart) */}
       <div className="panel-b">
-        <div className="sec"><span className="sec-t">Proof-time distribution</span><span className="rule"></span><span className="sec-c">last {snap.stats.dist ? snap.stats.dist.total : 0} ranges</span></div>
-        <Histogram dist={snap.stats.dist} />
+        <div className="sec"><span className="sec-t">Proof-time trend</span><span className="rule"></span><span className="sec-c">last {snap.stats.dist ? snap.stats.dist.total : 0} ranges</span></div>
+        <ProofTrend durations={snap.recentDurations} stats={snap.stats.dist} />
       </div>
 
       {/* 5 — the two work lists, side by side (similar height) */}
