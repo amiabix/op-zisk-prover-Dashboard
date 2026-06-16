@@ -350,7 +350,7 @@ function Dashboard({ snap, now }) {
       {/* 4 — proof-time trend (full width — wide chart) */}
       <div className="panel-b">
         <div className="sec"><span className="sec-t">Proof-time trend</span><span className="rule"></span><span className="sec-c">last {snap.stats.dist ? snap.stats.dist.total : 0} ranges</span></div>
-        <ProofTrend durations={snap.recentDurations} stats={snap.stats.dist} />
+        <ProofTrend jobs={snap.history} stats={snap.stats.dist} />
       </div>
 
       {/* 5 — the two work lists, side by side (similar height) */}

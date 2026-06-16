@@ -2,7 +2,7 @@
 // OP-ZiSK Prover — chart components → window.
 // Sparkline, Timeline (stage gantt), ProofTrend (proof-time series).
 // ==============================================================
-const { pad: _pad, fmtSecs: _fmtSecs, fmtClock: _fmtClock, SHORT: _SHORT } = window.PU;
+const { pad: _pad, fmtSecs: _fmtSecs, fmtClock: _fmtClock, fmtBlock: _fmtBlock, SHORT: _SHORT } = window.PU;
 
 // ---------------------- sparkline ----------------------
 function Sparkline({ data, w = 150, h = 30 }) {
@@ -106,59 +106,77 @@ function Timeline({ job, showAxis = true }) {
   );
 }
 
-// ---------------------- proof-time trend (time series of recent ranges) ----------------------
-// Each point = one recent range's total proof time, oldest → newest left to right.
-// Far easier to read than a distribution: you see whether proving is steady or drifting.
-function ProofTrend({ durations, stats }) {
-  const secs = (durations || []).slice().reverse().map((ms) => ms / 1000); // chronological
-  if (secs.length < 2 || !stats) return <div className="empty">Not enough data yet</div>;
+// ---------------------- proof-time trend (interactive time series) ----------------------
+// One point per recent range, oldest → newest. Hover anywhere to inspect that range's
+// proof time + blocks; click to open it. Median / p95 reference lines for context.
+function ProofTrend({ jobs, stats }) {
+  const [hover, setHover] = React.useState(null);
+
+  const pts = (jobs || [])
+    .filter((j) => j.elapsedMs > 0)
+    .slice().reverse() // chronological: oldest → newest
+    .map((j) => ({ ms: j.elapsedMs, id: j.id, s: j.rangeStart, e: j.rangeEnd, blk: j.blocks }));
+  if (pts.length < 2 || !stats) return <div className="empty">Not enough data yet</div>;
 
   const W = 640, H = 200;
-  const padL = 34, padR = 14, padT = 16, padB = 24;
+  const padL = 36, padR = 16, padT = 16, padB = 26;
   const plotW = W - padL - padR, plotH = H - padT - padB, baseY = padT + plotH;
 
-  const hi = Math.max(...secs, stats.p95 || 0) * 1.08;
-  const xFor = (i) => padL + (i / (secs.length - 1)) * plotW;
-  const yFor = (s) => baseY - (s / (hi || 1)) * plotH;
+  const secs = pts.map((p) => p.ms / 1000);
+  const top = Math.max(...secs, stats.p95 || 0) * 1.08;
+  const xFor = (i) => padL + (i / (pts.length - 1)) * plotW;
+  const yFor = (s) => baseY - (s / (top || 1)) * plotH;
   const fmtT = (s) => `${Math.floor(s / 60)}:${_pad(Math.round(s) % 60)}`;
 
-  const pts = secs.map((s, i) => ({ x: xFor(i), y: yFor(s) }));
-  const line = pts.map((p, i) => `${i ? "L" : "M"}${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(" ");
-  const area = `M${pts[0].x.toFixed(1)} ${baseY} ` + pts.map((p) => `L${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(" ") + ` L${pts[pts.length - 1].x.toFixed(1)} ${baseY} Z`;
-  const last = pts[pts.length - 1];
+  const coords = secs.map((s, i) => ({ x: xFor(i), y: yFor(s) }));
+  const line = coords.map((p, i) => `${i ? "L" : "M"}${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(" ");
+  const area = `M${coords[0].x.toFixed(1)} ${baseY} ` + coords.map((p) => `L${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(" ") + ` L${coords[coords.length - 1].x.toFixed(1)} ${baseY} Z`;
 
-  // y reference lines: median (accent) + p95 (gray)
-  const refs = [
-    { s: stats.p50, color: "var(--accent)" },
-    { s: stats.p95, color: "var(--t3)" },
-  ];
-  const yTicks = [0, stats.p50, hi].filter((v, i, a) => v != null && a.indexOf(v) === i);
+  const refs = [{ s: stats.p50, color: "var(--accent)" }, { s: stats.p95, color: "var(--t3)" }];
+  const yTicks = [0, stats.p50, top].filter((v, i, a) => v != null && a.indexOf(v) === i);
+
+  const onMove = (e) => {
+    const r = e.currentTarget.getBoundingClientRect();
+    const vx = ((e.clientX - r.left) / r.width) * W; // mouse x in viewBox units
+    const i = Math.round(((vx - padL) / plotW) * (pts.length - 1));
+    setHover(Math.max(0, Math.min(pts.length - 1, i)));
+  };
+  const hp = hover != null ? { ...pts[hover], ...coords[hover] } : null;
+  const lastC = coords[coords.length - 1];
 
   return (
     <div className="hist">
-      <svg className="hist-svg" viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: "auto", display: "block" }}>
-        {/* y axis ticks (minutes) */}
-        {yTicks.map((v, i) => (
-          <text key={i} x={padL - 8} y={yFor(v) + 3.5} textAnchor="end" fill="var(--t3)" style={{ font: "500 10px var(--mono)" }}>{fmtT(v)}</text>
-        ))}
+      <div className="trend-wrap" onMouseMove={onMove} onMouseLeave={() => setHover(null)}
+           onClick={() => hp && (window.location.hash = "#/block/" + hp.id)}>
+        <svg className="hist-svg" viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: "auto", display: "block", cursor: hp ? "pointer" : "default" }}>
+          {yTicks.map((v, i) => (
+            <text key={i} x={padL - 8} y={yFor(v) + 3.5} textAnchor="end" fill="var(--t3)" style={{ font: "500 10px var(--mono)" }}>{fmtT(v)}</text>
+          ))}
+          {refs.map((r, i) => (
+            <line key={i} x1={padL} y1={yFor(r.s)} x2={W - padR} y2={yFor(r.s)} stroke={r.color} strokeWidth="1.4" strokeDasharray="4 4" opacity="0.65" />
+          ))}
 
-        {/* horizontal median + p95 reference lines */}
-        {refs.map((r, i) => (
-          <line key={i} x1={padL} y1={yFor(r.s)} x2={W - padR} y2={yFor(r.s)} stroke={r.color} strokeWidth="1.4" strokeDasharray="4 4" opacity="0.7" />
-        ))}
+          <path d={area} fill="var(--dark)" opacity="0.05" />
+          <path d={line} fill="none" stroke="var(--dark)" strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" opacity="0.9" />
 
-        {/* trend area + line */}
-        <path d={area} fill="var(--dark)" opacity="0.05" />
-        <path d={line} fill="none" stroke="var(--dark)" strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" opacity="0.9" />
+          {/* latest point */}
+          <circle cx={lastC.x} cy={lastC.y} r="3.4" fill="var(--dark)" />
 
-        {/* latest point */}
-        <circle cx={last.x} cy={last.y} r="3.6" fill="var(--dark)" />
-        <circle cx={last.x} cy={last.y} r="6.5" fill="none" stroke="var(--dark)" strokeWidth="1.2" opacity="0.3" />
+          {/* hover guide + point */}
+          {hp && <line x1={hp.x} y1={padT} x2={hp.x} y2={baseY} stroke="var(--accent)" strokeWidth="1" opacity="0.45" />}
+          {hp && <circle cx={hp.x} cy={hp.y} r="5" fill="var(--accent)" stroke="#fff" strokeWidth="1.5" />}
 
-        {/* x direction hint */}
-        <text x={padL} y={H - 7} textAnchor="start" fill="var(--t4)" style={{ font: "500 10px var(--mono)" }}>older</text>
-        <text x={W - padR} y={H - 7} textAnchor="end" fill="var(--t4)" style={{ font: "500 10px var(--mono)" }}>latest</text>
-      </svg>
+          <text x={padL} y={H - 7} textAnchor="start" fill="var(--t4)" style={{ font: "500 10px var(--mono)" }}>older</text>
+          <text x={W - padR} y={H - 7} textAnchor="end" fill="var(--t4)" style={{ font: "500 10px var(--mono)" }}>latest</text>
+        </svg>
+
+        {hp && (
+          <div className="trend-tip" style={{ left: `${(hp.x / W) * 100}%`, top: `${(hp.y / H) * 100}%` }}>
+            <b>{fmtT(hp.ms / 1000)}</b>
+            <span>{_fmtBlock(hp.s)} → {_fmtBlock(hp.e)} · {hp.blk} blk</span>
+          </div>
+        )}
+      </div>
 
       <div className="hist-legend">
         <span className="hl"><span className="hl-t">fastest</span><b>{fmtT(stats.fastest)}</b></span>
