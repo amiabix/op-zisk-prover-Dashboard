@@ -308,7 +308,7 @@ body {
 
 /* ===================== PANELS / DASH GRID ===================== */
 .panel-b { background: var(--card); border-radius: var(--r-lg); box-shadow: var(--sh); padding: 20px 22px; margin-top: 24px; }
-.dash-grid { display: grid; grid-template-columns: 1.45fr 1fr; gap: 24px; margin-top: 24px; align-items: start; }
+.dash-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; align-items: start; }
 .dash-grid .panel-b { margin-top: 0; }
 
 /* ===================== TABLES ===================== */

@@ -371,17 +371,17 @@ function Dashboard({ snap, now }) {
       {/* 3 — detailed network metrics */}
       <NetMetrics m={m} />
 
-      {/* 4 — proof-time distribution + backlog */}
-      <div className="dash-grid">
-        <div className="panel-b">
-          <div className="sec"><span className="sec-t">Proof-time distribution</span><span className="rule"></span><span className="sec-c">{snap.stats.dist ? snap.stats.dist.total : 0} ranges</span></div>
-          <Histogram dist={snap.stats.dist} />
-        </div>
-        <Queue queue={snap.queue} perAgg={m && m.rangesPerAgg} />
+      {/* 4 — proof-time distribution (full width — wide chart) */}
+      <div className="panel-b">
+        <div className="sec"><span className="sec-t">Proof-time distribution</span><span className="rule"></span><span className="sec-c">last {snap.stats.dist ? snap.stats.dist.total : 0} ranges</span></div>
+        <Histogram dist={snap.stats.dist} />
       </div>
 
-      {/* 5 — aggregations */}
-      <AggList aggs={snap.aggregations} />
+      {/* 5 — the two work lists, side by side (similar height) */}
+      <div className="dash-grid">
+        <Queue queue={snap.queue} perAgg={m && m.rangesPerAgg} />
+        <AggList aggs={snap.aggregations} />
+      </div>
 
       {/* 6 — recent ranges */}
       <StreamTable history={snap.history} />

@@ -175,7 +175,9 @@ async function proven(aggs) {
       proofBytes:r.proofBytes, txHash:null, startedAt:r.finishedAt-(r.totalMs||0), finishedAt:r.finishedAt,
       elapsedMs:r.totalMs||0, etaMs:0, note:"range-proof-only", _mt:r.finishedAt, _dur:r.totalMs||0 };
   });
-  return { history, metrics: computeMetrics(recs, aggs || []) };
+  // FULL proven-key set (not the 60-capped history) so the queue never lists an
+  // already-proven older range just because it fell out of the recent window.
+  return { history, metrics: computeMetrics(recs, aggs || []), provenKeys: new Set(ledger.keys()) };
 }
 
 // aggregation runs every RANGES_PER_AGG ranges -> agg-<first>-to-<last>.log.
@@ -325,12 +327,11 @@ function activeJob(avgPh) {
 async function cycle() {
   const status = provingStatus();
   const aggs = aggRecords();                              // read agg logs once per cycle
-  const { history, metrics } = await proven(aggs);
+  const { history, metrics, provenKeys } = await proven(aggs);
   const active = status === "proving" ? activeJob(metrics.avgPhases) : null;
   const [cid,l1,l2] = await Promise.all([rpc(L2,"eth_chainId"), rpc(L1,"eth_blockNumber"), rpc(L2,"eth_blockNumber")]);
   const recentDurations = history.filter(j=>j._dur>0).map(j=>j._dur);
-  const frontier = history.length ? Math.max(...history.map(j=>j.rangeEnd)) : null;
-  const provenKeys = new Set(history.map(j=>j.rangeStart+"-"+j.rangeEnd));
+  const frontier = provenKeys.size ? Math.max(...[...provenKeys].map(k=>+k.split("-")[1])) : null;
   const queue = witnessQueue(provenKeys, active ? active.rangeStart+"-"+active.rangeEnd : null);
   metrics.backlogRanges = queue.length;
   metrics.backlogBlocks = queue.reduce((a,j)=>a+j.blocks,0);
