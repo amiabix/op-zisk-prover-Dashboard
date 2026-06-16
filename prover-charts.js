@@ -1,4 +1,6 @@
 // AUTO-GENERATED from prover-charts.jsx — edit the .jsx, run `npm run build`.
+(function () {
+"use strict";
 // ==============================================================
 // OP-ZiSK Prover — chart components → window.
 // Sparkline, Timeline (stage gantt), ProofTrend (proof-time series).
@@ -340,3 +342,4 @@ Object.assign(window, {
   Timeline,
   ProofTrend
 });
+})();

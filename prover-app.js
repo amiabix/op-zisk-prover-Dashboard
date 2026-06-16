@@ -1,4 +1,6 @@
 // AUTO-GENERATED from prover-app.jsx — edit the .jsx, run `npm run build`.
+(function () {
+"use strict";
 // ==============================================================
 // OP-ZiSK Prover — app shell + hash router + views.
 // Views: dashboard (live) · blocks (list) · block (detail).
@@ -1178,3 +1180,4 @@ function App() {
   }, content));
 }
 ReactDOM.createRoot(document.getElementById("root")).render(/*#__PURE__*/React.createElement(App, null));
+})();
