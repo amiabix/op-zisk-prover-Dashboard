@@ -1,11 +1,12 @@
 #!/usr/bin/env node
 /* HONEST Vast proving monitor -> feed.json. Everything from real sources:
-   - chain/heads from RPC; host from nvidia-smi
-   - history: real proof files; per-phase stages+durations parsed from the run log
-   - active: live block, phases parsed from the running tmux pane (no log file yet)
-   The pipeline shown = the REAL cargo-zisk range-proof phases:
-     Witness gen → Prover setup → Execute → Contributions → Inner proofs
-   No agg/snark/settle — they don't run here. Nothing fabricated; unknowns = 0/"—". */
+   - chain/heads from RPC; host + GPU util from nvidia-smi; gas/txs summed from chain
+   - history: durable append-only ledger, one frozen record per proven range
+   - per-phase stages+durations parsed from logs/proof-loop-mainnet/{witness,range,agg}-*.log
+   - active: the live GPU --prove job; phases + live elapsed from its durable log
+   Pipeline (range): Witness → Prover setup → Execute → Contributions → Inner proofs
+   Pipeline (agg):   Setup → Execute → Contributions → Inner → SNARK wrap (PLONK)
+   Aggregation runs every RANGES_PER_AGG ranges. Nothing fabricated; unknowns = 0/"—". */
 "use strict";
 const fs = require("fs"), path = require("path"), cp = require("child_process");
 const ROOT = "/root/op-zisk";
@@ -40,6 +41,8 @@ function loadLedger() {
   return m;
 }
 function appendLedger(rec) { try { fs.appendFileSync(LEDGER, JSON.stringify(rec) + "\n"); } catch {} }
+// rewrite the whole ledger (only to fill real missing data from chain — never to fabricate)
+function rewriteLedger(map) { try { fs.writeFileSync(LEDGER, [...map.values()].map(r => JSON.stringify(r)).join("\n") + "\n"); } catch {} }
 
 function env(k){try{const s=fs.readFileSync(path.join(ROOT,".env.vast-mainnet"),"utf8");const m=s.split("\n").find(l=>l.startsWith(k+"="));return m?m.slice(k.length+1).trim():null}catch{return null}}
 const L1=env("L1_RPC"), L2=env("L2_RPC");
@@ -127,7 +130,7 @@ function smokePane() {
   return "";
 }
 
-async function proven() {
+async function proven(aggs) {
   const ledger = loadLedger();
   // finalize any proof file not yet in the ledger: freeze its record once.
   const seen = new Set();
@@ -151,8 +154,19 @@ async function proven() {
         finishedAt: st.mtimeMs };
       appendLedger(rec); ledger.set(k, rec);
     } }
+  // bounded gas/txs repair: backfill up to 2 records that froze at gas=0 (transient RPC fail at finalize)
+  let budget = 2, repaired = false;
+  for (const r of ledger.values()) {
+    if (budget <= 0) break;
+    if ((r.gas || 0) === 0 && (r.e - r.s) > 0) {
+      budget--;
+      const gt = await rangeGasTxs(r.s, r.e);
+      if (gt && gt.gas > 0) { r.gas = gt.gas; r.txs = gt.txs; repaired = true; }
+    }
+  }
+  if (repaired) rewriteLedger(ledger);
   const recs = [...ledger.values()];
-  const history = recs.sort((a,b)=>b.finishedAt-a.finishedAt).slice(0,60).map(r => {
+  const history = recs.slice().sort((a,b)=>b.finishedAt-a.finishedAt).slice(0,60).map(r => {
     const stages = PIPE.map(p => ({ key:p[0], name:p[1], status:"done",
       durationMs:(r.phases&&r.phases[p[0]])||0, elapsedMs:(r.phases&&r.phases[p[0]])||0 }));
     return { id:"B-"+r.s, rangeStart:r.s, rangeEnd:r.e, blocks:r.blocks, host:r.host||HOST, status:"proven",
@@ -161,7 +175,7 @@ async function proven() {
       proofBytes:r.proofBytes, txHash:null, startedAt:r.finishedAt-(r.totalMs||0), finishedAt:r.finishedAt,
       elapsedMs:r.totalMs||0, etaMs:0, note:"range-proof-only", _mt:r.finishedAt, _dur:r.totalMs||0 };
   });
-  return { history, metrics: computeMetrics(recs, aggRecords()) };
+  return { history, metrics: computeMetrics(recs, aggs || []) };
 }
 
 // aggregation runs every RANGES_PER_AGG ranges -> agg-<first>-to-<last>.log.
@@ -219,10 +233,6 @@ function activePhaseStart(txt, activeKey) {
   }
   return ts;
 }
-function firstLogStart(txt) {
-  const m = txt.match(/^(\d{4}-\d\d-\d\dT[\d:.]+Z)/m);
-  return m ? Date.parse(m[1]) : 0;
-}
 function computeMetrics(recs, aggs) {
   aggs = aggs || [];
   const aggDone = aggs.filter(a => a.totalMs > 0);
@@ -275,7 +285,11 @@ function witnessQueue(provenKeys, activeKey) {
 }
 
 function activeJob(avgPh) {
-  const m = sh("ps -eo args").match(/release\/multi --start (\d+) --end (\d+)/); if (!m) return null;
+  // pick the GPU --prove job, NOT a --witness-only prefetch (the loop runs several at once)
+  const lines = sh("ps -eo args").split("\n").filter(l => /release\/multi --start \d+ --end \d+/.test(l));
+  const line = lines.find(l => /--prove/.test(l) && !/--witness-only/.test(l)) || lines.find(l => !/--witness-only/.test(l));
+  if (!line) return null;
+  const m = line.match(/--start (\d+) --end (\d+)/); if (!m) return null;
   const s=+m[1], e=+m[2];
   const log = rangeLog(s, e);                             // live tee'd log; durable + complete
   const txt = (log || smokePane()).replace(/\x1b\[[0-9;]*m/g, "");
@@ -310,7 +324,8 @@ function activeJob(avgPh) {
 
 async function cycle() {
   const status = provingStatus();
-  const { history, metrics } = await proven();
+  const aggs = aggRecords();                              // read agg logs once per cycle
+  const { history, metrics } = await proven(aggs);
   const active = status === "proving" ? activeJob(metrics.avgPhases) : null;
   const [cid,l1,l2] = await Promise.all([rpc(L2,"eth_chainId"), rpc(L1,"eth_blockNumber"), rpc(L2,"eth_blockNumber")]);
   const recentDurations = history.filter(j=>j._dur>0).map(j=>j._dur);
@@ -319,12 +334,14 @@ async function cycle() {
   const queue = witnessQueue(provenKeys, active ? active.rangeStart+"-"+active.rangeEnd : null);
   metrics.backlogRanges = queue.length;
   metrics.backlogBlocks = queue.reduce((a,j)=>a+j.blocks,0);
-  const aggregations = aggRecords().slice(0, 40).map(aggJob);
+  const aggregations = aggs.slice(0, 40).map(aggJob);
   history.forEach(j=>{delete j._mt;delete j._dur});
   // GPU utilization (stall corroboration + display)
   const gpu = sh("nvidia-smi --query-gpu=utilization.gpu --format=csv,noheader,nounits").split("\n").map(x=>parseInt(x)).filter(x=>!isNaN(x));
   const gpuUtil = gpu.length ? Math.round(gpu.reduce((a,b)=>a+b,0)/gpu.length) : null;
-  const snap = { connected: status==="proving", chain: CHAINS[cid]||(cid?"chain "+cid:"unknown"),
+  // connected = the monitor is alive + writing this feed; the prover's own state (proving/
+  // idle/building) is conveyed by provingStatus. The client flips this false on fetch failure.
+  const snap = { connected: true, chain: CHAINS[cid]||(cid?"chain "+cid:"unknown"),
     l1Head: l1?parseInt(l1,16):0, l2Head: l2?parseInt(l2,16):0, l2ProvenFrontier: frontier,
     provingStatus: status, active, queue, history, aggregations, metrics, recentDurations, failedCount: 0, gpuUtil,
     source: `${metrics.rangesProven} ranges · ${metrics.blocksProven} blocks proven · frontier ${frontier??"—"} · head ${l2?parseInt(l2,16):"?"}` };
@@ -333,4 +350,12 @@ async function cycle() {
   process.stdout.write(`\r[vast] ${status} active=${a} proven=${history.length} head=${l2?parseInt(l2,16):"?"}   `);
 }
 console.log("[vast-bridge] host", HOST);
-cycle(); setInterval(cycle, POLL);
+// single-flight: never let a slow cycle (gas backfill / RPC) overlap the next tick.
+let _running = false;
+async function tick() {
+  if (_running) return;
+  _running = true;
+  try { await cycle(); } catch (e) { process.stderr.write("\n[vast-bridge] cycle error: " + e.message + "\n"); }
+  finally { _running = false; }
+}
+tick(); setInterval(tick, POLL);

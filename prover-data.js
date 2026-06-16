@@ -123,7 +123,10 @@
       this.failedCount = 0;
       this._timer = null;
       this._lastTick = 0;
-      this._seed();
+      // LIVE mode (window.OPZISK_FEED_URL set): never seed mock data. Show empty until the
+      // first real snapshot arrives — a failed fetch must never surface fabricated jobs.
+      const live = typeof window !== "undefined" && window.OPZISK_FEED_URL;
+      if (!live) this._seed();
     }
 
     // ---- pub/sub ----
